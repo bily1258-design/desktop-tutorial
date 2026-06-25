@@ -1,71 +1,65 @@
-# leisu-scraper
+# leisu-scraper ⚽
 
-雷速体育(leisu.com)足球赔率数据抓取工具 — 百家平均欧赔+亚盘+大小球+角球
+雷速体育(leisu.com)独立预测系统 — 数据抓取 + 泊松预测 + EV/Kelly + HTML看板
 
-## 数据源
+## 架构
 
-- **首页**: `www.leisu.com` → 提取当日足球比赛列表 (match_id)
-- **SWOT接口**: `web-gateway.leisu.com/v1/web/match/football/swot` → 百家平均赔率数据
+```
+leisu-scraper/
+├── src/
+│   ├── leisu_scraper.py    # 主抓取入口
+│   ├── leisu_matches.py    # 首页比赛列表提取（双结构解析）
+│   ├── leisu_swot.py       # SWOT 数据解析（百家平均赔率/概率）
+│   ├── leisu_client.py     # HTTP 客户端（Cookie + 解密）
+│   ├── leisu_decrypt.py    # web-gateway 响应解密
+│   ├── leisu_matcher.py    # 队名匹配
+│   ├── config.py           # 配置
+│   ├── predict.py          # 泊松预测引擎（λ反推 + 融合 + EV + Kelly）
+│   ├── db.py               # SQLite 管理（精简 schema）
+│   ├── pipeline.py         # 全链路：抓取→预测→入库→看板
+│   └── dashboard.py        # HTML 看板生成
+├── data/
+│   └── leisu.db            # SQLite 数据库
+├── output/
+│   ├── leisu_*.json        # 原始抓取数据
+│   └── dashboard_*.html    # 看板页面
+└── requirements.txt
+```
 
-## 数据字段
-
-| 雷速字段 | 映射到 DB | 说明 |
-|---------|----------|------|
-| `europe[0][0/1/2]` | `avg_odds_close_w/d/l` | 百家平均欧赔 |
-| `europe[1][0/1/2]` | `avg_prob_w/d/l` | 隐含概率% |
-| `asia[0][0/1/2]` | `ah_home_water/handicap/away_water` | 亚盘 |
-| `bs[0][0/1/2]` | `ou_over/line/under` | 大小球 |
-| `corner[0][0/1/2]` | `corner_over/line/under` | 角球盘 |
-| `win_rate[0/1]` | `win_rate_home/away` | SWOT胜率 |
-
-## 用法
+## 使用
 
 ```bash
-# 安装依赖
-pip install requests
+# 完整流程（抓取+预测+入库+看板）
+python -m src.pipeline --date 2026-06-25
 
-# 默认: 从首页获取当日足球比赛, 批量抓取SWOT
-python -m src.leisu_scraper
+# 跳过抓取，用已有 JSON
+python -m src.pipeline --date 2026-06-25 --skip-fetch
 
-# 测试模式: 只取前5场
-python -m src.leisu_scraper --test
-
-# 指定日期
-python -m src.leisu_scraper --date 2026-06-25
-
-# 指定match_id
-python -m src.leisu_scraper --match-ids 4460943,4460940
-
-# 扫描match_id范围
-python -m src.leisu_scraper --scan-range 4460940 4460970
+# 只生成看板
+python -m src.pipeline --date 2026-06-25 --dashboard-only
 ```
 
-## 项目结构
+## 预测模型
 
-```
-src/
-├── config.py          # 端点、常量、路径配置
-├── leisu_decrypt.py   # 解密模块 (roott+base64+gzip)
-├── leisu_client.py    # HTTP客户端 (Cookie/限流)
-├── leisu_matches.py   # 首页比赛列表提取
-├── leisu_swot.py      # SWOT数据解析 (DB字段映射)
-├── leisu_matcher.py   # 队名匹配 (雷速→DB)
-└── leisu_scraper.py   # 主入口
-```
+1. **隐含概率**：雷速百家平均直接提供（去抽水后的市场概率）
+2. **泊松预测**：隐含概率 → 反推 λ_home/λ_away → 泊松独立分布
+3. **融合**：`final = 0.5×泊松 + 0.5×隐含概率`
+4. **EV**：`EV = final_prob × (odds-1) - (1-final_prob)`
+5. **Kelly**：`f* = (b×p - q) / b`，b=赔率-1，p=final_prob，q=1-p
+6. **价值标记**：EV > 5% → 🔥
 
-## 解密链路
+## 参数
 
-雷速 web-gateway 响应加密: `code` 字段 100-126 动态变化
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| BASE_TOTAL_GOALS | 2.4 | 联赛平均总进球 |
+| HOME_ADV | 0.15 | 主场加成 |
+| SKILL_FACTOR | 0.6 | 实力调整系数 |
+| POISSON_WEIGHT | 0.5 | 泊松权重 |
+| EV阈值 | 5% | 价值投注标记线 |
 
-```
-encrypted_data → roott(data, code-100) → base64.decode → gzip.decompress(wbits=31) → URL.decode → JSON
-```
+## 数据来源
 
-## 集成到 football-dashboard
-
-输出 JSON 可直接导入 football-dashboard 的 pipeline:
-
-```python
-# pipeline中添加步骤: fetch_leisu_swot
-# 将雷速百家平均赔率写入 poisson_predictions 表
-```
+- 比赛列表：`https://www.leisu.com/` 首页 HTML
+- SWOT数据：`https://web-gateway.leisu.com/v1/web/match/football/swot?match_id={id}`
+- 不限竞彩，所有足球比赛均可入场
