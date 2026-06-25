@@ -1,5 +1,4 @@
-output/
 __pycache__/
 *.pyc
+*.db
 .leisu_cookies.json
-.env
