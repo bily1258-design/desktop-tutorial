@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
 """pipeline.py — 雷速独立预测系统主入口
 
-全链路：抓取 → 预测 → 入库 → 看板
+全链路：抓取 → 预测 → 入库 → 看板 → 复盘
 
 用法:
   python -m src.pipeline --date 2026-06-25
-  python -m src.pipeline --date 2026-06-25 --skip-fetch  # 跳过抓取，用已有JSON
-  python -m src.pipeline --date 2026-06-25 --dashboard-only  # 只生成看板
+  python -m src.pipeline --date 2026-06-25 --skip-fetch
+  python -m src.pipeline --date 2026-06-25 --review-only
 """
 
 import argparse
 import json
 import os
-import sys
 import sqlite3
+import sys
 from datetime import datetime
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(SCRIPT_DIR)
-
-# 确保可以 import 同目录模块
 sys.path.insert(0, SCRIPT_DIR)
 
 from db import init_db, upsert_prediction, get_predictions, get_db_path
@@ -116,7 +114,7 @@ def step_save(predicted: list, db_path: str, date_str: str):
 
 
 def step_dashboard(db_path: str, date_str: str, output_dir: str) -> str:
-    """Step 4: 生成 HTML 看板"""
+    """Step 4: 生成预测看板"""
     from dashboard import generate_dashboard
     conn = sqlite3.connect(db_path)
     preds = get_predictions(conn, date_str)
@@ -128,8 +126,18 @@ def step_dashboard(db_path: str, date_str: str, output_dir: str) -> str:
 
     output_path = os.path.join(output_dir, f"dashboard_{date_str.replace('-', '')}.html")
     generate_dashboard(preds, date_str, output_path)
-    print(f"  📊 看板生成: {output_path}")
+    print(f"  📊 预测看板: {output_path}")
     return output_path
+
+
+def step_review(db_path: str, date_str: str, output_dir: str) -> str:
+    """Step 5: 复盘（赛果回填 + 分析 + 看板）"""
+    from review import run_review
+    stats = run_review(date_str, db_path, output_dir)
+    if stats:
+        output_path = os.path.join(output_dir, f"review_{date_str.replace('-', '')}.html")
+        return output_path
+    return ""
 
 
 def main():
@@ -139,6 +147,7 @@ def main():
     parser.add_argument('--skip-fetch', action='store_true', help='跳过抓取，用已有JSON')
     parser.add_argument('--dashboard-only', action='store_true', help='只生成看板')
     parser.add_argument('--predict-only', action='store_true', help='只预测不入库')
+    parser.add_argument('--review-only', action='store_true', help='只复盘')
     args = parser.parse_args()
 
     date_str = args.date or datetime.now().strftime('%Y-%m-%d')
@@ -150,8 +159,11 @@ def main():
     print(f"🏆 雷速独立预测系统 — {date_str}")
     print(f"{'='*60}")
 
-    # 初始化 DB
     init_db(db_path)
+
+    if args.review_only:
+        step_review(db_path, date_str, output_dir)
+        return
 
     if args.dashboard_only:
         step_dashboard(db_path, date_str, output_dir)
@@ -160,16 +172,14 @@ def main():
     # Step 1: 抓取
     json_path = None
     if not args.skip_fetch:
-        print(f"\n▶ [1/4] 抓取雷速数据")
+        print(f"\n▶ [1/5] 抓取雷速数据")
         try:
             json_path = step_fetch(date_str, output_dir)
         except Exception as e:
             print(f"  ❌ 抓取失败: {e}")
-            # 尝试用已有 JSON
             json_path = os.path.join(output_dir, f"leisu_{date_str.replace('-', '')}.json")
 
     if not json_path or not os.path.exists(json_path):
-        # 找最新的 JSON
         jsons = sorted([f for f in os.listdir(output_dir) if f.startswith('leisu_') and f.endswith('.json')])
         if jsons:
             json_path = os.path.join(output_dir, jsons[-1])
@@ -179,26 +189,33 @@ def main():
             return
 
     # Step 2: 预测
-    print(f"\n▶ [2/4] 泊松预测")
+    print(f"\n▶ [2/5] 泊松预测")
     predicted = step_predict(json_path)
 
     if args.predict_only:
-        # 打印摘要
         for p in predicted[:5]:
             print(f"  {p['home_team']} vs {p['away_team']} → {p.get('prediction','?')} "
                   f"({p.get('prediction_prob',0):.1%}) risk={p.get('risk_level','')}")
         return
 
     # Step 3: 入库
-    print(f"\n▶ [3/4] 写入 DB")
+    print(f"\n▶ [3/5] 写入 DB")
     step_save(predicted, db_path, date_str)
 
-    # Step 4: 看板
-    print(f"\n▶ [4/4] 生成看板")
-    step_dashboard(db_path, date_str, output_dir)
+    # Step 4: 预测看板
+    print(f"\n▶ [4/5] 生成预测看板")
+    dashboard_path = step_dashboard(db_path, date_str, output_dir)
+
+    # Step 5: 复盘
+    print(f"\n▶ [5/5] 复盘")
+    review_path = step_review(db_path, date_str, output_dir)
 
     print(f"\n{'='*60}")
     print(f"🎉 完成! DB={db_path}")
+    if dashboard_path:
+        print(f"   预测看板: {dashboard_path}")
+    if review_path:
+        print(f"   复盘报告: {review_path}")
     print(f"{'='*60}")
 
 
