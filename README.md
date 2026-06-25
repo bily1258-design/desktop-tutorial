@@ -1,51 +1,107 @@
-# football-ai-engine
+# leisu-scraper
 
-简单的足球比赛预测演示仓库（Streamlit 前端 + 简易规则引擎 + XGBoost 示例）。
+雷速体育(leisu.com)足球赔率数据抓取工具，为预测系统提供百家平均赔率补充数据源。
 
-## 目录结构（简要）
-- app.py         # Streamlit 前端，展示 predictions.json 中的结果
-- main.py        # 抓取 API 数据并生成 predictions.json（示例）
-- predict.py     # 用 pandas+xgboost 训练并生成 predictions.json（示例）
-- requirements.txt
+## 核心能力
 
-## 快速开始（本地）
-1. 克隆仓库
-   git clone https://github.com/bily1258-design/football-ai-engine.git
-   cd football-ai-engine
+- **百家平均欧赔**: SWOT接口提供100+家博彩公司的平均赔率
+- **亚盘数据**: 让球盘口 + 水位（百家平均）
+- **大小球**: 盘口 + 水位（百家平均）
+- **角球盘**: 雷速独有数据
+- **SWOT胜率**: 基于历史数据的胜率分析
 
-2. 建议先创建并激活虚拟环境（示例：venv）
-   python -m venv .venv
-   source .venv/bin/activate   # macOS/Linux
-   .venv\Scripts\activate      # Windows
+## 数据获取方式
 
-3. 安装依赖
-   pip install -r requirements.txt
+| 方式 | 说明 | 覆盖范围 |
+|------|------|---------|
+| `--homepage` | 从首页提取比赛 | 当日热门约10场 |
+| `--scan-range START END` | 扫描match_id范围 | 自定义范围 |
+| `--match-ids ID1,ID2` | 指定match_id | 精确控制 |
 
-4. 设置环境变量（如果使用 main.py 抓取在线 API）
-   export FOOTBALL_API_KEY="your_api_key_here"   # macOS/Linux
-   set FOOTBALL_API_KEY="your_api_key_here"      # Windows CMD
-   $Env:FOOTBALL_API_KEY="your_api_key_here"     # PowerShell
+## 快速开始
 
-   注意：main.py 中使用的是 football-data.org 的 API，请根据该服务的文档获取正确 API Key 和 endpoint。
+```bash
+# 安装依赖
+pip install -r requirements.txt
 
-5. 生成预测（任选其一）
-   - 使用 rules/engine（main.py）抓取并生成文件：
-     python main.py
+# 测试模式 (只取5场)
+python -m src.leisu_scraper --test
 
-   - 或运行示例模型训练并生成 predictions.json（predict.py）：
-     python predict.py
+# 扫描指定ID范围
+python -m src.leisu_scraper --scan-range 4460940 4460970
 
-6. 启动前端（Streamlit）
-   streamlit run app.py
+# 指定match_id
+python -m src.leisu_scraper --match-ids 4460943,4460950
 
-默认情况下 app.py 会读取仓库根目录下的 `predictions.json` 并展示其中的记录。
+# 指定日期 (影响输出文件名)
+python -m src.leisu_scraper --date 2026-06-25 --scan-range 4460940 4461000
+```
 
-## 说明与建议
-- 已统一前端读取 `predictions.json`，确保 main.py/predict.py 写出该文件以便前端展示。
-- 请在生产或公开仓库中：
-  - 不把密钥写入代码库；使用环境变量或 CI secret。
-  - 给依赖指定精确版本并使用 lock 文件以保证可复现。
-  - 增加测试和 CI（建议添加 GitHub Actions 做 lint 和 basic tests）。
+## 输出格式
 
-## 许可
-请在此处添加 LICENSE（当前仓库没有 LICENSE，请根据需要添加）。
+```json
+{
+  "date": "2026-06-25",
+  "fetch_time": "2026-06-25T10:00:00",
+  "source": "scan",
+  "count": 16,
+  "matches": [
+    {
+      "match_id": 4460943,
+      "home_team": "波黑",
+      "away_team": "卡塔尔",
+      "avg_odds_w": 1.38,
+      "avg_odds_d": 4.45,
+      "avg_odds_l": 5.55,
+      "ah_handicap": 1.0,
+      "ah_home_water": 0.98,
+      "ah_away_water": 0.88,
+      "ou_line": 2.25,
+      "ou_over": 0.8,
+      "ou_under": 1.05
+    }
+  ]
+}
+```
+
+## 解密原理
+
+雷速web-gateway返回加密数据，解密链路：
+
+```
+roott(data, code-100) → base64 decode → gzip decompress → URL decode → JSON
+```
+
+关键点：
+- `roott`是Caesar位移，**解密方向为减shift**
+- 压缩格式为gzip (wbits=31)
+- shift值 = code - 100，动态变化(100-126)
+
+## 与现有预测系统集成
+
+输出的`avg_odds_w/d/l`对应DB字段`avg_odds_close_w/d/l`，
+`ah_handicap/home_water/away_water`对应DB的亚盘字段。
+
+匹配方式：通过队名相似度匹配到DB中的`poisson_predictions`记录，
+然后UPDATE对应字段。
+
+## 项目结构
+
+```
+src/
+├── config.py          # 配置（端点、常量、路径）
+├── leisu_decrypt.py   # 解密模块（roott+base64+gzip）
+├── leisu_client.py    # HTTP客户端（Cookie管理、请求控制）
+├── leisu_swot.py      # SWOT数据解析（映射到DB字段）
+├── leisu_matches.py   # 比赛列表获取（HTML解析）
+├── leisu_matcher.py   # 队名匹配（雷速→DB映射）
+└── leisu_scraper.py   # 主入口
+output/                # 输出目录
+```
+
+## 注意事项
+
+- Cookie有效期有限，需定期刷新（访问www.leisu.com自动获取）
+- 请求间隔1.5秒，避免触发WAF
+- SWOT接口无WAF，可从curl直接访问
+- match_id为递增序列，扫描模式可发现所有比赛
