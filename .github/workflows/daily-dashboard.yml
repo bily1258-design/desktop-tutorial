@@ -19,22 +19,33 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
 
-      - name: Run pipeline
+      - name: Restore DB cache
+        uses: actions/cache@v4
+        with:
+          path: data/leisu.db
+          key: leisu-db-${{ github.run_id }}
+          restore-keys: leisu-db-
+
+      - name: Run pipeline (fetch + predict + save + dashboard + review)
         env:
           LEISU_COOKIE: ${{ secrets.LEISU_COOKIE }}
         run: |
           python -m src.pipeline --date $(date +%Y-%m-%d)
 
-      - name: Copy dashboard to docs
+      - name: Copy dashboards to docs
         run: |
           cp output/dashboard_*.html docs/index.html
           cp output/leisu_*.json docs/data.json
+          # 复盘看板单独放
+          for f in output/review_*.html; do
+            [ -f "$f" ] && cp "$f" docs/review.html
+          done
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/
+          git add docs/ data/
           git diff --quiet && git diff --cached --quiet && exit 0
           git commit -m "dashboard: auto-update $(date +%Y-%m-%d)"
           git push

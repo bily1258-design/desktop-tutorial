@@ -20,13 +20,13 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, SCRIPT_DIR)
 
-from db import init_db, upsert_prediction, get_predictions, get_db_path
-from predict import predict_match
+from src.db import init_db, upsert_prediction, get_predictions, get_db_path
+from src.predict import predict_match
 
 
 def step_fetch(date_str: str, output_dir: str) -> str:
     """Step 1: 抓取雷速数据 → JSON"""
-    from leisu_scraper import run_scraper
+    from src.leisu_scraper import run_scraper
     output_path = os.path.join(output_dir, f"leisu_{date_str.replace('-', '')}.json")
     result = run_scraper(output_path=output_path, date_str=date_str)
     print(f"  ✅ 抓取完成: {result.get('count', 0)} 场比赛")
@@ -115,7 +115,7 @@ def step_save(predicted: list, db_path: str, date_str: str):
 
 def step_dashboard(db_path: str, date_str: str, output_dir: str) -> str:
     """Step 4: 生成预测看板"""
-    from dashboard import generate_dashboard
+    from src.dashboard import generate_dashboard
     conn = sqlite3.connect(db_path)
     preds = get_predictions(conn, date_str)
     conn.close()
@@ -132,7 +132,7 @@ def step_dashboard(db_path: str, date_str: str, output_dir: str) -> str:
 
 def step_review(db_path: str, date_str: str, output_dir: str) -> str:
     """Step 5: 复盘（赛果回填 + 分析 + 看板）"""
-    from review import run_review
+    from src.review import run_review
     stats = run_review(date_str, db_path, output_dir)
     if stats:
         output_path = os.path.join(output_dir, f"review_{date_str.replace('-', '')}.html")

@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS predictions (
 
     -- 赛果复盘
     actual_outcome TEXT DEFAULT '',
+    actual_score TEXT DEFAULT '',
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 

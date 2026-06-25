@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """review.py — 赛果回填 + 复盘分析
 
-数据源: 500.com 完场比分 (live.500.com/wanchang.php)
+数据源: 雷速 match_stats API (web-gateway.leisu.com)
 功能: 
-  1. 抓取赛果 → 回填 DB actual_outcome
+  1. 通过 match_id 获取赛果 → 回填 DB actual_outcome + actual_score
   2. 对比预测 vs 实际 → 命中率 / ROI / 偏差分析
   3. 生成复盘 HTML 看板
+
+优势: 队名同源（100%匹配），比分来自雷速官方（无翻译误差）
 """
 
 import json
@@ -23,126 +25,86 @@ import requests
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(SCRIPT_DIR)
 
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Accept': 'text/html,application/xhtml+xml',
-}
 
+def fetch_leisu_results(match_ids: List[int], client=None) -> Dict[int, Dict]:
+    """通过雷速 match_stats API 获取赛果
 
-# ========== 队名别名表 ==========
-_ALIAS = {
-    '巴萨': '巴塞罗那', '皇马': '皇家马德里', '贝蒂斯': '皇家贝蒂斯',
-    '国米': '国际米兰', '米兰': 'AC米兰',
-    '曼城': '曼彻斯特城', '热刺': '托特纳姆热刺', '纽卡': '纽卡斯尔联',
-    '拜仁': '拜仁慕尼黑', '马竞': '马德里竞技',
-}
+    Args:
+        match_ids: 雷速比赛ID列表
+        client: LeisuClient实例（可选，不传则自建）
 
-
-def name_sim(a: str, b: str) -> float:
-    """字符集相似度"""
-    if not a or not b:
-        return 0.0
-    a2, b2 = _ALIAS.get(a, a), _ALIAS.get(b, b)
-    s1 = len(set(a2) & set(b2)) / max(len(a2), len(b2), 1)
-    # 也试原始
-    s2 = len(set(a) & set(b)) / max(len(a), len(b), 1)
-    return max(s1, s2)
-
-
-def fetch_500com_results(date_str: str = None) -> List[Dict]:
-    """从500.com抓完场比分
-
-    返回: [{league, kickoff, home, away, score, home_goals, away_goals, outcome}]
-    outcome: 'W' / 'D' / 'L' (主视角)
+    Returns:
+        {match_id: {score: '2-1', home_goals: 2, away_goals: 1, outcome: 'W', status: 'finished'}}
     """
-    try:
-        r = requests.get("https://live.500.com/wanchang.php", headers=HEADERS, timeout=20)
-    except Exception as e:
-        print(f"  ❌ 500.com 请求失败: {e}")
-        return []
+    if client is None:
+        from src.leisu_client import LeisuClient
+        client = LeisuClient()
+        client.login()
 
-    if r.status_code != 200:
-        print(f"  ❌ 500.com HTTP {r.status_code}")
-        return []
+    from src.leisu_decrypt import decrypt_auto
 
-    try:
-        text = r.content.decode('gbk', errors='replace')
-    except:
-        text = r.content.decode('utf-8', errors='replace')
+    results = {}
+    for mid in match_ids:
+        try:
+            resp = client.session.get(
+                f'https://web-gateway.leisu.com/v1/web/match/football/match_stats?match_id={mid}',
+                timeout=10, verify=False
+            )
+            raw = resp.json()
+            code = raw.get('code', -1)
 
-    results = []
-    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', text, re.S)
+            if 100 <= code <= 126:
+                data = decrypt_auto(raw['data'], code)
+                incidents = data.get('incidents', [])
 
-    for row in rows:
-        tds = re.findall(r'<td[^>]*>(.*?)</td>', row, re.S)
-        if len(tds) < 8:
-            continue
+                # 找最后一个有home_score/away_score的进球事件 → 最终比分
+                last_score = None
+                for inc in incidents:
+                    if 'home_score' in inc and 'away_score' in inc:
+                        last_score = (inc['home_score'], inc['away_score'])
 
-        clean = [re.sub(r'<[^>]+>', '', td).strip() for td in tds]
+                if last_score:
+                    hg, ag = last_score
+                    outcome = 'W' if hg > ag else ('D' if hg == ag else 'L')
+                    results[mid] = {
+                        'score': f'{hg}-{ag}',
+                        'home_goals': hg,
+                        'away_goals': ag,
+                        'outcome': outcome,
+                        'status': 'finished',
+                    }
+                else:
+                    # 无进球事件 = 未完场或0-0
+                    if incidents:
+                        results[mid] = {
+                            'score': '0-0',
+                            'home_goals': 0,
+                            'away_goals': 0,
+                            'outcome': 'D',
+                            'status': 'finished',
+                        }
+                    else:
+                        results[mid] = {
+                            'score': None,
+                            'home_goals': None,
+                            'away_goals': None,
+                            'outcome': None,
+                            'status': 'not_started',
+                        }
+            elif code == 110:
+                results[mid] = {'status': 'auth_required', 'outcome': None}
+            else:
+                results[mid] = {'status': f'error_code_{code}', 'outcome': None}
 
-        # TD[0]=联赛, TD[1]=轮次, TD[2]=时间, TD[3]=状态(完), 
-        # TD[4]=主队+排名, TD[5]=亚盘, TD[6]=客队+排名, TD[7]=比分
-        league = clean[0]
-        kickoff = clean[2]
-        status = clean[3]
-        home_raw = clean[4]
-        away_raw = clean[6]
-        score_raw = clean[7]
+        except Exception as e:
+            results[mid] = {'status': f'error: {e}', 'outcome': None}
 
-        # 只要完场
-        if status != '完':
-            continue
-
-        # 解析比分 "2 - 1" or "1:0"
-        score_m = re.match(r'(\d+)\s*[-:]\s*(\d+)', score_raw)
-        if not score_m:
-            continue
-
-        hg = int(score_m.group(1))
-        ag = int(score_m.group(2))
-
-        # 解析队名（去掉排名数字）
-        home = re.sub(r'^\[\d+\]', '', home_raw).strip()
-        home = re.sub(r'^\d+', '', home).strip()
-        away = re.sub(r'\[\d+\]$', '', away_raw).strip()
-        away = re.sub(r'\d+$', '', away).strip()
-
-        outcome = 'W' if hg > ag else ('D' if hg == ag else 'L')
-
-        results.append({
-            'league': league,
-            'kickoff': kickoff,
-            'home': home,
-            'away': away,
-            'score': f"{hg}-{ag}",
-            'home_goals': hg,
-            'away_goals': ag,
-            'outcome': outcome,
-        })
-
-    print(f"  📥 500.com: {len(results)} 场完场")
     return results
 
 
-def match_result(db_home, db_away, results: List[Dict]) -> Optional[Dict]:
-    """在500.com结果中匹配比赛"""
-    best = None
-    best_sim = 0
-    for r in results:
-        sim_fwd = (name_sim(db_home, r['home']) + name_sim(db_away, r['away'])) / 2
-        sim_rev = (name_sim(db_home, r['away']) + name_sim(db_away, r['home'])) / 2
-        sim = max(sim_fwd, sim_rev)
-        if sim > best_sim:
-            best_sim = sim
-            best = r
-    if best and best_sim >= 0.4:
-        return best
-    return None
-
-
-def backfill_results(conn, results: List[Dict], date_str: str) -> Tuple[int, int]:
-    """回填赛果到 DB"""
-    from db import get_predictions
+def backfill_leisu_results(conn, results: Dict[int, Dict], date_str: str) -> Tuple[int, int]:
+    """回填雷速赛果到 DB（直接用match_id，100%匹配）"""
+    from src.db import get_predictions
 
     preds = get_predictions(conn, date_str)
     filled = 0
@@ -151,11 +113,17 @@ def backfill_results(conn, results: List[Dict], date_str: str) -> Tuple[int, int
     for p in preds:
         if p.get('actual_outcome'):
             continue  # 已有赛果
-        r = match_result(p['home_team'], p['away_team'], results)
-        if r:
+
+        mid = p.get('match_id')
+        if not mid or mid not in results:
+            no_match += 1
+            continue
+
+        r = results[mid]
+        if r.get('outcome'):
             conn.execute(
-                "UPDATE predictions SET actual_outcome = ? WHERE date = ? AND home_team = ? AND away_team = ?",
-                (r['outcome'], date_str, p['home_team'], p['away_team'])
+                "UPDATE predictions SET actual_outcome = ?, actual_score = ? WHERE date = ? AND match_id = ?",
+                (r['outcome'], r.get('score'), date_str, mid)
             )
             filled += 1
         else:
@@ -167,7 +135,7 @@ def backfill_results(conn, results: List[Dict], date_str: str) -> Tuple[int, int
 
 def analyze_performance(conn, date_str: str) -> Dict:
     """分析预测表现"""
-    from db import get_predictions
+    from src.db import get_predictions
 
     preds = get_predictions(conn, date_str)
 
@@ -216,26 +184,11 @@ def analyze_performance(conn, date_str: str) -> Dict:
             stats['value_bets']['total'] += 1
             if hit:
                 stats['value_bets']['hit'] += 1
-                # ROI: 假设投注1单位，赢了得到 odds-1
                 odds_map = {'W': p.get('avg_odds_w', 0), 'D': p.get('avg_odds_d', 0), 'L': p.get('avg_odds_l', 0)}
                 odds = odds_map.get(pred, 0) or 0
                 stats['value_bets']['roi'] += (odds - 1) if odds > 1 else 0
             else:
-                stats['value_bets']['roi'] -= 1  # 亏1单位
-
-        # EV 偏差
-        ev_key = f'ev_{pred.lower()}'
-        ev_pred = p.get(ev_key, 0) or 0
-        actual_return = 1.0 if hit else 0.0  # 简化
-        stats['ev_accuracy'].append({
-            'home': p.get('home_team', ''),
-            'away': p.get('away_team', ''),
-            'pred': pred,
-            'outcome': outcome,
-            'hit': hit,
-            'ev': ev_pred,
-            'risk': p.get('risk_level', ''),
-        })
+                stats['value_bets']['roi'] -= 1
 
         stats['matches'].append({
             'home': p.get('home_team', ''),
@@ -243,7 +196,7 @@ def analyze_performance(conn, date_str: str) -> Dict:
             'league': p.get('league', ''),
             'pred': pred,
             'outcome': outcome,
-            'score': '',  # 从 match_result 获取
+            'score': p.get('actual_score', ''),
             'hit': hit,
             'risk': p.get('risk_level', ''),
             'confidence': p.get('confidence_index', 0),
@@ -304,6 +257,7 @@ def generate_review_dashboard(stats: Dict, output_path: str):
         pred_cn = DIRECTION_CN.get(m['pred'], m['pred'])
         outcome_cn = DIRECTION_CN.get(m['outcome'], m['outcome'])
         row_class = 'hit' if m['hit'] else 'miss'
+        score_display = m.get('score', '') or '-'
 
         match_rows += f"""
         <tr class="{row_class}">
@@ -311,8 +265,10 @@ def generate_review_dashboard(stats: Dict, output_path: str):
             <td class="center">{html_mod.escape(m['league'])}</td>
             <td class="center"><b>{pred_cn}</b></td>
             <td class="center">{outcome_cn}</td>
+            <td class="center">{score_display}</td>
             <td class="center">{hit_icon}</td>
             <td class="center">{m['risk']}</td>
+            <td class="center">{m['confidence']}★</td>
             <td class="center">{m['ev']:+.1%}</td>
         </tr>"""
 
@@ -349,7 +305,7 @@ td {{ padding:6px; border-bottom:1px solid #2a2a4a; }}
 </head>
 <body>
 <h1>📊 复盘报告</h1>
-<div class="subtitle">{stats['date']} | 雷速独立预测系统</div>
+<div class="subtitle">{stats['date']} | 雷速独立预测系统 | 数据源: leisu match_stats</div>
 
 <div class="stats">
     <div class="stat">
@@ -393,13 +349,13 @@ td {{ padding:6px; border-bottom:1px solid #2a2a4a; }}
 <div class="section">
 <h2>逐场复盘</h2>
 <table>
-<tr><th>比赛</th><th>联赛</th><th>预测</th><th>实际</th><th>结果</th><th>风险</th><th>EV</th></tr>
+<tr><th>比赛</th><th>联赛</th><th>预测</th><th>实际</th><th>比分</th><th>结果</th><th>风险</th><th>信心</th><th>EV</th></tr>
 {match_rows}
 </table>
 </div>
 
 <div class="footer">
-    雷速复盘 | 数据源: 500.com 赛果 + leisu.com 赔率 | {datetime.now().strftime('%Y-%m-%d %H:%M')}
+    雷速复盘 | 数据源: leisu.com match_stats API | {datetime.now().strftime('%Y-%m-%d %H:%M')}
 </div>
 </body>
 </html>"""
@@ -411,7 +367,7 @@ td {{ padding:6px; border-bottom:1px solid #2a2a4a; }}
 
 def run_review(date_str: str = None, db_path: str = None, output_dir: str = None):
     """执行复盘全流程"""
-    from db import init_db, get_db_path
+    from src.db import init_db, get_db_path, get_predictions
 
     if not date_str:
         date_str = datetime.now().strftime('%Y-%m-%d')
@@ -422,17 +378,28 @@ def run_review(date_str: str = None, db_path: str = None, output_dir: str = None
 
     print(f"📊 复盘 — {date_str}")
 
-    # Step 1: 抓赛果
-    print("  [1/3] 抓取500.com赛果")
-    results = fetch_500com_results(date_str)
-    if not results:
-        print("  ⚠️ 无赛果数据")
+    # Step 1: 从DB获取当天所有match_id
+    conn = sqlite3.connect(db_path)
+    preds = get_predictions(conn, date_str)
+    match_ids = [p['match_id'] for p in preds if p.get('match_id')]
+    print(f"  [1/3] 获取 {len(match_ids)} 个match_id")
+
+    if not match_ids:
+        print("  ⚠️ 无比赛数据")
+        conn.close()
         return
 
-    # Step 2: 回填
-    conn = sqlite3.connect(db_path)
-    filled, no_match = backfill_results(conn, results, date_str)
-    print(f"  [2/3] 回填: {filled} 场匹配, {no_match} 场未匹配")
+    # Step 2: 雷速API获取赛果 + 回填
+    print("  [2/3] 雷速 match_stats 获取赛果...")
+    results = fetch_leisu_results(match_ids)
+    finished = sum(1 for r in results.values() if r.get('status') == 'finished')
+    print(f"         {finished}/{len(match_ids)} 场已完场")
+
+    # 清空旧的错误赛果
+    conn.execute("UPDATE predictions SET actual_outcome = NULL, actual_score = NULL WHERE date = ?", (date_str,))
+
+    filled, no_match = backfill_leisu_results(conn, results, date_str)
+    print(f"         回填: {filled} 场匹配, {no_match} 场未完场")
 
     # Step 3: 分析 + 看板
     stats = analyze_performance(conn, date_str)
@@ -441,6 +408,12 @@ def run_review(date_str: str = None, db_path: str = None, output_dir: str = None
     print(f"  [3/3] 分析: {stats['resolved']} 场已出结果, 命中率 {stats['hit_rate']}%")
     if stats['value_bets']['total'] > 0:
         print(f"         价值投注: {stats['value_bets']['hit']}/{stats['value_bets']['total']} ROI={stats['value_bets']['roi_pct']}%")
+
+    # 逐场打印
+    DIRECTION_CN = {'W': '主胜', 'D': '平局', 'L': '客胜'}
+    for m in stats['matches']:
+        icon = '✅' if m['hit'] else '❌'
+        print(f"         {icon} {m['home']} vs {m['away']}: 预测={DIRECTION_CN.get(m['pred'],'')} 实际={DIRECTION_CN.get(m['outcome'],'')} ({m.get('score','')}) risk={m['risk']} conf={m['confidence']}★")
 
     output_path = os.path.join(output_dir, f"review_{date_str.replace('-', '')}.html")
     generate_review_dashboard(stats, output_path)

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>复盘报告 — 2026-06-25</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#1a1a2e; color:#e0e0e0; font-family:'SF Mono','Cascadia Code',monospace; padding:20px; }
+h1 { color:#fff; font-size:20px; margin-bottom:4px; }
+.subtitle { color:#888; font-size:12px; margin-bottom:16px; }
+.stats { display:flex; gap:16px; margin-bottom:20px; flex-wrap:wrap; }
+.stat { background:#16213e; padding:10px 16px; border-radius:6px; min-width:120px; }
+.stat-label { color:#888; font-size:11px; }
+.stat-value { color:#fff; font-size:20px; font-weight:bold; }
+.stat-value.green { color:#4caf50; }
+.stat-value.red { color:#f44336; }
+.stat-value.orange { color:#ff9800; }
+.section { margin-bottom:24px; }
+.section h2 { color:#ccc; font-size:14px; margin-bottom:8px; border-bottom:1px solid #2a2a4a; padding-bottom:4px; }
+table { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:16px; }
+th { background:#16213e; color:#aaa; padding:6px; text-align:left; }
+td { padding:6px; border-bottom:1px solid #2a2a4a; }
+.center { text-align:center; }
+.hit { background:rgba(76,175,80,0.05); }
+.miss { background:rgba(244,67,54,0.05); }
+.hit:hover { background:rgba(76,175,80,0.12); }
+.miss:hover { background:rgba(244,67,54,0.12); }
+.footer { margin-top:20px; color:#555; font-size:11px; text-align:center; }
+</style>
+</head>
+<body>
+<h1>📊 复盘报告</h1>
+<div class="subtitle">2026-06-25 | 雷速独立预测系统 | 数据源: leisu match_stats</div>
+
+<div class="stats">
+    <div class="stat">
+        <div class="stat-label">总场次</div>
+        <div class="stat-value">14</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">已出结果</div>
+        <div class="stat-value">7</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">命中率</div>
+        <div class="stat-value green">85.7%</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">价值投注</div>
+        <div class="stat-value orange">2/3</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">价值ROI</div>
+        <div class="stat-value green">5.7%</div>
+    </div>
+</div>
+
+<div class="section">
+<h2>方向命中</h2>
+<table>
+<tr><th>方向</th><th>总数</th><th>命中</th><th>命中率</th></tr>
+
+            <tr>
+                <td class="center">主胜</td>
+                <td class="center">4</td>
+                <td class="center">4</td>
+                <td class="center">100%</td>
+            </tr>
+            <tr>
+                <td class="center">客胜</td>
+                <td class="center">3</td>
+                <td class="center">2</td>
+                <td class="center">67%</td>
+            </tr>
+</table>
+</div>
+
+<div class="section">
+<h2>风险等级命中</h2>
+<table>
+<tr><th>风险</th><th>总数</th><th>命中</th><th>命中率</th></tr>
+
+            <tr>
+                <td class="center" style="color:#4caf50">低</td>
+                <td class="center">3</td>
+                <td class="center">3</td>
+                <td class="center">100%</td>
+            </tr>
+            <tr>
+                <td class="center" style="color:#ff9800">中</td>
+                <td class="center">1</td>
+                <td class="center">0</td>
+                <td class="center">0%</td>
+            </tr>
+            <tr>
+                <td class="center" style="color:#f44336">高</td>
+                <td class="center">3</td>
+                <td class="center">3</td>
+                <td class="center">100%</td>
+            </tr>
+</table>
+</div>
+
+<div class="section">
+<h2>逐场复盘</h2>
+<table>
+<tr><th>比赛</th><th>联赛</th><th>预测</th><th>实际</th><th>比分</th><th>结果</th><th>风险</th><th>信心</th><th>EV</th></tr>
+
+        <tr class="hit">
+            <td>波黑 vs 卡塔尔</td>
+            <td class="center">世界杯</td>
+            <td class="center"><b>主胜</b></td>
+            <td class="center">主胜</td>
+            <td class="center">3-1</td>
+            <td class="center">✅</td>
+            <td class="center">低</td>
+            <td class="center">3.5★</td>
+            <td class="center">+3.8%</td>
+        </tr>
+        <tr class="hit">
+            <td>苏格兰 vs 巴西</td>
+            <td class="center">世界杯</td>
+            <td class="center"><b>客胜</b></td>
+            <td class="center">客胜</td>
+            <td class="center">0-3</td>
+            <td class="center">✅</td>
+            <td class="center">低</td>
+            <td class="center">3.5★</td>
+            <td class="center">+73.7%</td>
+        </tr>
+        <tr class="hit">
+            <td>斯波坎速度 vs 西切斯特</td>
+            <td class="center">美甲</td>
+            <td class="center"><b>主胜</b></td>
+            <td class="center">主胜</td>
+            <td class="center">2-1</td>
+            <td class="center">✅</td>
+            <td class="center">低</td>
+            <td class="center">3.5★</td>
+            <td class="center">-6.3%</td>
+        </tr>
+        <tr class="miss">
+            <td>南非 vs 韩国</td>
+            <td class="center">世界杯</td>
+            <td class="center"><b>客胜</b></td>
+            <td class="center">主胜</td>
+            <td class="center">1-0</td>
+            <td class="center">❌</td>
+            <td class="center">中</td>
+            <td class="center">2.0★</td>
+            <td class="center">+28.9%</td>
+        </tr>
+        <tr class="hit">
+            <td>瑞士 vs 加拿大</td>
+            <td class="center">世界杯</td>
+            <td class="center"><b>主胜</b></td>
+            <td class="center">主胜</td>
+            <td class="center">2-1</td>
+            <td class="center">✅</td>
+            <td class="center">高</td>
+            <td class="center">2.0★</td>
+            <td class="center">-2.7%</td>
+        </tr>
+        <tr class="hit">
+            <td>摩洛哥 vs 海地</td>
+            <td class="center">世界杯</td>
+            <td class="center"><b>主胜</b></td>
+            <td class="center">主胜</td>
+            <td class="center">4-2</td>
+            <td class="center">✅</td>
+            <td class="center">高</td>
+            <td class="center">2.0★</td>
+            <td class="center">-3.2%</td>
+        </tr>
+        <tr class="hit">
+            <td>捷克 vs 墨西哥</td>
+            <td class="center">世界杯</td>
+            <td class="center"><b>客胜</b></td>
+            <td class="center">客胜</td>
+            <td class="center">0-3</td>
+            <td class="center">✅</td>
+            <td class="center">高</td>
+            <td class="center">1.5★</td>
+            <td class="center">+10.4%</td>
+        </tr>
+</table>
+</div>
+
+<div class="footer">
+    雷速复盘 | 数据源: leisu.com match_stats API | 2026-06-25 13:34
+</div>
+</body>
+</html>
